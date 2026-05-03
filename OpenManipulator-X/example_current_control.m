@@ -61,7 +61,7 @@ for k = 1:length(t)
     %% Create Control Law Your Controller goes Here
     tau_k(:, k) = [0;0;0;0];
 
-    torques = [0.0, tau_k(2, k), tau_k(3, k), tau_k(4, k)];
+    torques = [0.0, tau_k(2, k), tau_k(3, k),tau_k(4,k)];
     %% This is the mapping to Amperes
     current = torque_to_current(torques);
 
