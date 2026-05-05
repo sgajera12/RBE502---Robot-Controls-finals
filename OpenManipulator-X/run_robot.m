@@ -4,12 +4,10 @@
 % the controller drives it to the desired position.
 clc; clear all; close all;
 
-%% ==================== USER SETTINGS ====================
-CONTROLLER_TYPE = 'adaptive';           % 'ct', 'robust', or 'adaptive'
-TASK_TYPE = 'trajectory';         % 'regulation' or 'trajectory'
-% =========================================================
+CONTROLLER_TYPE = 'ct';% 'ct', 'robust', or 'adaptive'
+TASK_TYPE = 'regulation';% 'regulation' or 'trajectory'
 
-fprintf('=== RBE 502 Final Project - Real Robot ===\n');
+fprintf(' RBE 502 Final Project \n');
 fprintf('Controller: %s | Task: %s\n\n', CONTROLLER_TYPE, TASK_TYPE);
 
 addpath("Communication_Code");
@@ -31,17 +29,14 @@ p = [R.p(1:6); ...
      R.id_info.g];
 pf = [R.x_opt_vec(17); R.x_opt_vec(18); R.x_opt_vec(19); R.x_opt_vec(20)];
 p_geom = [p(1:6); p(23)];
+% p(10) = 0.100;
 
-%% Timing
-t_sample = 0.01;
-tfin = 10;
-t = 0:t_sample:tfin;
-N = length(t);
 
 %% Gains 
-Kp = diag([30 40 50 15]);
-Kv = diag([2 2 1 3 ]);
-
+% Kp = diag([20 30 40 30]);
+% Kv = diag([2 3 2 1 ]);
+Kp = diag([30 20 50 15]);
+Kv = diag([2 2 3 1 ]);
 %% Lyapunov equation (for robust and adaptive)
 n = 4;
 A_err = [zeros(n) eye(n); -Kp -Kv];
@@ -49,33 +44,70 @@ Q_lyap = eye(2*n);
 P_lyap = lyap(A_err', Q_lyap);
 
 %% Robust parameters
-rho = 2;
+rho = 5;
 epsilon = 1;
 
 %% Adaptive parameters
 n_params = 16;
 pi_hat = p(7:22);
-R_gain = 1e4 * eye(n_params);
+R_gain = 1e5 * eye(n_params);
 R_inv = inv(R_gain);
 
 %% Generate desired trajectory
 if strcmp(TASK_TYPE, 'regulation')
+    %% Timing
+    t_sample = 0.01;
+    tfin = 5;
+    t = 0:t_sample:tfin;
+    N = length(t);
     q_desired = repmat([0.50; -0.35; 0.30; 0.15], 1, N);
     q_desired_dot = zeros(4, N);
     q_desired_ddot = zeros(4, N);
 elseif strcmp(TASK_TYPE, 'trajectory')
-    q_center = [0; 0; 0; 0];
-    A_amp = [0.3; 0.3;1.0; 0.3];
-    omega = [1.0; 1.0; 1.0; 1.0];
+    t_sample = 0.04;
+    tfin = 15;
+    t = 0:t_sample:tfin;
+    N = length(t);
+
+    % Very gentle sine wave - small amplitude, slow speed
+    % Each joint: q_d(t) = A * sin(omega * t)
+    % A = 0.3 rad (~17 degrees), omega = 0.4 rad/s (one cycle in ~16 seconds)
+    A_amp   = [0.3;  0.2;  0.15;  0.2];     % smaller for joints 3,4
+    omega   = [0.4;  0.4;  0.4;   0.4];     % same slow speed
+
     q_desired = zeros(4, N);
     q_desired_dot = zeros(4, N);
     q_desired_ddot = zeros(4, N);
     for k = 1:N
-        q_desired(:,k) = q_center + A_amp .* sin(omega * t(k));
-        q_desired_dot(:,k) = A_amp .* omega .* cos(omega * t(k));
+        q_desired(:,k)      = A_amp .* sin(omega * t(k));
+        q_desired_dot(:,k)  = A_amp .* omega .* cos(omega * t(k));
         q_desired_ddot(:,k) = -A_amp .* (omega.^2) .* sin(omega * t(k));
     end
 end
+% elseif strcmp(TASK_TYPE, 'trajectory')
+%     % load trajectory from recorded waypoints
+%     % run record_waypoints.m then generate_trajectory.m first
+%     traj = load('desired_trajectory.mat');
+%     q_desired = traj.q_desired;
+%     q_desired_dot = traj.q_desired_dot;
+%     q_desired_ddot = traj.q_desired_ddot;
+%     t_sample = traj.t_sample;
+%     tfin = traj.tfin;
+%     t = 0:t_sample:tfin;
+%     N = length(t);
+% 
+%     % make sure trajectory and time vector match
+%     if size(q_desired, 2) ~= N
+%         N = min(N, size(q_desired, 2));
+%         t = t(1:N);
+%         q_desired = q_desired(:, 1:N);
+%         q_desired_dot = q_desired_dot(:, 1:N);
+%         q_desired_ddot = q_desired_ddot(:, 1:N);
+%     end
+% 
+%     fprintf('Loaded trajectory: %d waypoints, %.1f seconds\n', ...
+%         size(traj.waypoints, 1), tfin);
+% end
 
 %% Connect robot and go directly to current mode (like friend's code)
 robot = Robot();
@@ -169,6 +201,11 @@ for k = 1:N
     end
 
     % send torque to robot (same conversion as friend's code)
+    % friction compensation (real robot only, per project instructions)
+    % F = ViscousFriction_fun(q_dot_now, pf);
+    % tau_hist(:, k) = tau_hist(:, k) + F;
+    % 
+    % torques = [tau_hist(1,k), tau_hist(2,k), tau_hist(3,k), tau_hist(4,k)];
     torques = [tau_hist(1,k), tau_hist(2,k), tau_hist(3,k), tau_hist(4,k)];
     current = torque_to_current(torques);
     current_mA = current * factor_A_to_mA;
@@ -206,7 +243,6 @@ else
 end
 fprintf('Saved: %s\n', save_name);
 
-%% Plots
 %% Plots
 fig_prefix = sprintf('%s / %s', upper(CONTROLLER_TYPE), TASK_TYPE);
 

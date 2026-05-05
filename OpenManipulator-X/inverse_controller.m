@@ -9,6 +9,6 @@ function tau = inverse_controller(q, q_dot, q_d, q_dot_d, q_ddot_d, Kp, Kv, p)
     C = C_fun(q, q_dot, p);
     G = G_fun(q, p);
 
-    aq = q_ddot_d + Kv * e_dot + Kp * e;
-    tau = M * aq + C * q_dot + G;
+    aq = q_ddot_d;
+    tau = M * aq+ Kv * e_dot + Kp * e  + C * q_dot + G;
 end

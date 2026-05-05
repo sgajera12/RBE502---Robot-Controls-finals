@@ -1,65 +1,51 @@
-function [tau, pi_hat_dot] = adaptive_controller(q, q_dot, ...
+function [tau, pi_hat_new, pi_hat_dot] = adaptive_controller(q, q_dot, ...
                                 q_d, q_dot_d, q_ddot_d, ...
-                                pi_hat, Kp, Kv, P, R_inv, p_geom)
-% adaptive_controller  Adaptive computed torque control (Lecture 24).
+                                Kp, Kv, P, R_inv, ...
+                                pi_hat, p_geom, dt)
+% adaptive_controller  Adaptive computed torque using regressor form.
+%   Matches the real-robot implementation.
 %
-% Control law:
-%   tau = M_hat(q) * aq + C_hat(q,q_dot)*q_dot + G_hat(q)
-%   where aq = q_ddot_d + Kv*e_dot + Kp*e
-%
-% Adaptation law (L24 Slide 4):
-%   pi_hat_dot = R_inv * Y' * M_hat^{-T} * w
-%   where w = E' * P * z,  z = [e; e_dot]
-%
-% Rate limiting is applied to pi_hat_dot to prevent numerical blow-up
-% when M_hat is ill-conditioned (small masses/inertias).
+%   Control law:   tau = Y(q, q_dot, a, p_geom) * pi_hat
+%   Adaptation:    pi_hat_dot = R_inv * Y' * pinv(B_hat)' * E' * P * xi
+%   B_hat(q) extracted from Y by column perturbation.
 
-    n = 4;
+    n = length(q);
 
-    % tracking error
-    e = q_d - q;
+    % errors
+    e    = q_d - q;
     e_dot = q_dot_d - q_dot;
+    xi   = [e; e_dot];
 
-    % clamp parameters to stay physical
-    pi_hat(1:4) = max(pi_hat(1:4), 1e-4);
-    pi_hat(5:16) = max(pi_hat(5:16), 1e-8);
+    % Build B_hat (estimated inertia) via column extraction from Y
+    zer    = zeros(n, 1);
+    Y_grav = Y_fun(q, zer, zer, p_geom);
+    B_hat  = zeros(n);
+    for jj = 1:n
+        ej = zer; ej(jj) = 1;
+        Y_j = Y_fun(q, zer, ej, p_geom);
+        B_hat(:, jj) = (Y_j - Y_grav) * pi_hat;
+    end
 
-    % build full parameter vector
-    p_hat = [p_geom(1:6); pi_hat; p_geom(7)];
+    % reference acceleration (with pinv(B_hat) on PD terms)
+    a = q_ddot_d + pinv(B_hat) * Kv * e_dot + pinv(B_hat) * Kp * e;
 
-    % estimated dynamics
-    M_hat = M_fun(q, p_hat);
-    C_hat = C_fun(q, q_dot, p_hat);
-    G_hat = G_fun(q, p_hat);
+    % control law: tau = Y * pi_hat
+    Y_a = Y_fun(q, q_dot, a, p_geom);
+    tau = Y_a * pi_hat;
 
-    % Kp = pinv(M_hat) * Kp;
-    % Kv = pinv(M_hat) * Kv;
-    % 
-    % commanded acceleration
-    aq = q_ddot_d + Kv * e_dot + Kp * e;
+    % adaptation law
+    E     = [zeros(n); eye(n)];
+    Y_dyn = Y_fun(q, q_dot, q_ddot_d, p_geom);
+    pi_hat_dot = R_inv * Y_dyn' * pinv(B_hat)' * E' * P * xi;
 
-    % control torque
-    tau = M_hat * aq + C_hat * q_dot + G_hat;
+    % Euler integration
+    delta_pi = pi_hat_dot * dt;
 
-    % --- Adaptation law ---
-    z = [e; e_dot];
+    % safety: reject if update is too large
+    if norm(delta_pi) > 1.05 * norm(pi_hat)
+        delta_pi = zeros(size(pi_hat));
+    end
 
-    % w = E' * P * z = bottom n rows of P times z
-    % w = P(n+1:2*n, :) * z;
-    E =[zeros(n,n);eye(n)];
-    w = E' * P *z;
-
-    % regressor at commanded acceleration
-    Y = Y_fun(q, q_dot, aq, p_geom);
-
-    % raw adaptation update
-    pi_hat_dot = R_inv * (Y' * ((pinv(M_hat))' * w));
-
-    % rate limit: each element can change at most 100% of its value per second
-    % floor prevents division issues for very small parameters
-    max_rate = max(abs(pi_hat), 1e-6);
-    pi_hat_dot = max(min(pi_hat_dot, max_rate), -max_rate);
-
-    % kill any NaN or Inf that might have leaked through
-    pi_hat_dot(~isfinite(pi_hat_dot)) = 0;
+    pi_hat_new = pi_hat + delta_pi;
+    pi_hat_new = max(pi_hat_new, 1e-6);
 end

@@ -1,4 +1,4 @@
-function tau = robust_controller(q, q_dot, q_d, q_dot_d, q_ddot_d, Kp, Kv, p, P, rho, epsilon)
+function tau = robust_controller(q, q_dot, q_d, q_dot_d, q_ddot_d, Kp, Kv, p, P, rho)
 % robust_controller  Robust computed torque control (no friction, for simulation).
 %   tau = M(q)*(q_ddot_d + Kv*e_dot + Kp*e + Delta) + C*q_dot + G
 %   Delta uses boundary-layer switching to handle inertia uncertainty.
@@ -15,15 +15,15 @@ function tau = robust_controller(q, q_dot, q_d, q_dot_d, q_ddot_d, Kp, Kv, p, P,
     z = [e; e_dot];
     B = [zeros(n); eye(n)];
 
-    w = B' * P * z;
+    w = 2* B' * P * z;
     w_norm = norm(w);
 
-    if w_norm > epsilon
-        Delta = rho * (w / w_norm);
-    else
-        Delta = rho * (w / epsilon);
-    end
+    % if w_norm > epsilon
+    Delta = rho * (w / w_norm);
+    % else
+    %     Delta = rho * (w / epsilon);
+    % end
 
-    aq = q_ddot_d + Kv * e_dot + Kp * e + Delta;
-    tau = M_hat * aq + C_hat * q_dot + G_hat;
+    aq = q_ddot_d  + Delta;
+    tau = M_hat * aq + Kv * e_dot + Kp * e + C_hat * q_dot + G_hat;
 end
