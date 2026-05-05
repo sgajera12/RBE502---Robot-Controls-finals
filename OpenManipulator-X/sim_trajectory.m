@@ -1,6 +1,7 @@
 %% sim_trajectory.m - Trajectory Tracking: Compare CT, Robust, Adaptive
-% No friction in simulation (per project instructions).
+% Uses RK4 integration (same as sim_regulation.m which works).
 clc; clear all; close all;
+addpath("generated_dynamics");
 
 %% Load nominal parameters
 R = load('Identification/identification_result.mat');
@@ -22,56 +23,58 @@ p_geom = [p_nom(1:6); p_nom(23)];
 
 %% Timing
 Ts = 0.01;
-tf = 60;
+tf = 30;
 t = 0:Ts:tf;
 N = length(t);
 
-%% Desired trajectory: smooth sinusoidal motion
-q_center = [0.30; -0.20; 0.20; 0.10];
-A_amp = [0.15; 0.2; 0.2; 0.1];
-omega = [0.5; 0.5; 0.5; 0.5];    % slow
+%% Desired trajectory - smooth single-frequency sinusoid
+omega_traj = 0.3;   % rad/s (one cycle ~ 21 seconds, ~3 cycles in 60s)
+q_center = [0.30; -0.20; 0.25; 0.10];
+A_amp    = [0.15;  0.10; 0.08; 0.05];
 
-q_d_traj = zeros(4, N);
-q_dot_d_traj = zeros(4, N);
-q_ddot_d_traj = zeros(4, N);
+q_d = zeros(4, N);
+q_dot_d_all = zeros(4, N);
+q_ddot_d_all = zeros(4, N);
 for k = 1:N
-    q_d_traj(:,k)     = q_center + A_amp .* sin(omega * t(k));
-    q_dot_d_traj(:,k) = A_amp .* omega .* cos(omega * t(k));
-    q_ddot_d_traj(:,k)= -A_amp .* (omega.^2) .* sin(omega * t(k));
+    q_d(:,k)          = q_center + A_amp * sin(omega_traj * t(k));
+    q_dot_d_all(:,k)  = A_amp * omega_traj * cos(omega_traj * t(k));
+    q_ddot_d_all(:,k) = -A_amp * omega_traj^2 * sin(omega_traj * t(k));
 end
 
-%% Initial conditions
-q0 = q_d_traj(:, 1);
-q_dot0 = q_dot_d_traj(:, 1);
+%% Initial conditions - start at the first desired position
+q0 = q_d(:,1);
+q_dot0 = q_dot_d_all(:,1);
 
-%% Controller gains
+%% Controller gains (same as regulation)
 Kp = diag([1 5 4 1]);
 Kv = diag([0.5 0.5 0.2 0.008]);
-M = M_fun(q0, p_nom);
 
-%% Lyapunov equation
+%% Lyapunov equation (same as regulation)
 n = 4;
+M = M_fun(q0, p_nom);
 A_err = [zeros(n) eye(n); -pinv(M)*Kp -pinv(M)*Kv];
 Q_lyap = eye(2*n);
 P = lyap(A_err', Q_lyap);
 
-%% Robust parameters
+%% Robust controller parameters
 rho = 0.8;
 
-%% Adaptive parameters
+%% Adaptive controller parameters
 n_params = 16;
 pi_hat_0 = p_nom(7:22);
 R_gain = 1e5 * eye(n_params);
 R_inv = inv(R_gain);
 
-%% Plant dynamics (true robot, no friction)
+%% Plant dynamics (RK4, no friction, regularized M to prevent singularity)
+% The identified masses are ~0.001 kg, making M nearly singular at some configurations. Adding a small regularization term (like minimum rotor inertia) 
+% prevents division by zero without changing the physics much.
+M_reg = 1e-4 * eye(4);
 plant_dyn = @(x, tau_in) [ ...
     x(5:8); ...
-    M_fun(x(1:4), p_true) \ (tau_in ...
+    (M_fun(x(1:4), p_true) + M_reg) \ (tau_in ...
         - C_fun(x(1:4), x(5:8), p_true) * x(5:8) ...
         - G_fun(x(1:4), p_true)) ...
 ];
-
 
 %% ===================== RUN 1: Computed Torque =====================
 fprintf('Running Computed Torque...\n');
@@ -80,8 +83,7 @@ q_ct(:,1) = q0; q_dot_ct(:,1) = q_dot0;
 
 for k = 1:N
     tau_ct(:,k) = inverse_controller(q_ct(:,k), q_dot_ct(:,k), ...
-                                     q_d_traj(:,k), q_dot_d_traj(:,k), ...
-                                     q_ddot_d_traj(:,k), Kp, Kv, p_nom);
+                                     q_d(:,k), q_dot_d_all(:,k), q_ddot_d_all(:,k), Kp, Kv, p_nom);
     if k < N
         h = Ts; xk = [q_ct(:,k); q_dot_ct(:,k)];
         k1 = plant_dyn(xk, tau_ct(:,k));
@@ -93,6 +95,7 @@ for k = 1:N
         q_dot_ct(:,k+1) = x_next(5:8);
     end
 end
+fprintf('CT done. Final error: %.4f\n', norm(q_d(:,N) - q_ct(:,N)));
 
 %% ===================== RUN 2: Robust =====================
 fprintf('Running Robust...\n');
@@ -101,8 +104,7 @@ q_rb(:,1) = q0; q_dot_rb(:,1) = q_dot0;
 
 for k = 1:N
     tau_rb(:,k) = robust_controller(q_rb(:,k), q_dot_rb(:,k), ...
-                                    q_d_traj(:,k), q_dot_d_traj(:,k), ...
-                                    q_ddot_d_traj(:,k), ...
+                                    q_d(:,k), q_dot_d_all(:,k), q_ddot_d_all(:,k), ...
                                     Kp, Kv, p_nom, P, rho);
     if k < N
         h = Ts; xk = [q_rb(:,k); q_dot_rb(:,k)];
@@ -115,6 +117,7 @@ for k = 1:N
         q_dot_rb(:,k+1) = x_next(5:8);
     end
 end
+fprintf('Robust done. Final error: %.4f\n', norm(q_d(:,N) - q_rb(:,N)));
 
 %% ===================== RUN 3: Adaptive =====================
 fprintf('Running Adaptive...\n');
@@ -127,13 +130,9 @@ pi_hat_hist(:,1) = pi_hat;
 for k = 1:N
     [tau_ad(:,k), pi_hat, ~] = adaptive_controller( ...
         q_ad(:,k), q_dot_ad(:,k), ...
-        q_d_traj(:,k), q_dot_d_traj(:,k), q_ddot_d_traj(:,k), ...
+        q_d(:,k), q_dot_d_all(:,k), q_ddot_d_all(:,k), ...
         Kp, Kv, P, R_inv, ...
         pi_hat, p_geom, Ts);
-
-    % pi_hat = pi_hat + Ts * pi_hat_dot;
-    % pi_hat(1:4) = max(pi_hat(1:4), 1e-4);
-    % pi_hat(5:16) = max(pi_hat(5:16), 1e-8);
 
     if k < N
         pi_hat_hist(:,k+1) = pi_hat;
@@ -148,33 +147,37 @@ for k = 1:N
         q_dot_ad(:,k+1) = x_next(5:8);
     end
 end
+fprintf('Adaptive done. Final error: %.4f\n', norm(q_d(:,N) - q_ad(:,N)));
 
 %% ===================== PLOTS =====================
 fprintf('Generating plots...\n');
 joint_labels = {'Joint 1', 'Joint 2', 'Joint 3', 'Joint 4'};
 
+% --- Joint Positions ---
 figure('Name', 'Trajectory: Joint Positions');
 for i = 1:4
     subplot(2,2,i);
-    plot(t, q_d_traj(i,:), 'r--', t, q_ct(i,:), 'b', ...
-         t, q_rb(i,:), 'g', t, q_ad(i,:), 'm', 'LineWidth', 1.2);
+    plot(t, q_d(i,:), 'r--', 'LineWidth', 1.5); hold on;
+    plot(t, q_ct(i,:), 'b', t, q_rb(i,:), 'g', t, q_ad(i,:), 'm', 'LineWidth', 1.2);
     xlabel('Time [s]'); ylabel('q_i [rad]');
     title(joint_labels{i}); grid on;
     if i == 1, legend('q_d', 'CT', 'Robust', 'Adaptive', 'Location', 'best'); end
 end
 sgtitle('Trajectory Tracking - Joint Positions');
 
+% --- Joint Velocities ---
 figure('Name', 'Trajectory: Joint Velocities');
 for i = 1:4
     subplot(2,2,i);
-    plot(t, q_dot_d_traj(i,:), 'r--', t, q_dot_ct(i,:), 'b', ...
-         t, q_dot_rb(i,:), 'g', t, q_dot_ad(i,:), 'm', 'LineWidth', 1.2);
+    plot(t, q_dot_d_all(i,:), 'r--', 'LineWidth', 1.5); hold on;
+    plot(t, q_dot_ct(i,:), 'b', t, q_dot_rb(i,:), 'g', t, q_dot_ad(i,:), 'm', 'LineWidth', 1.2);
     xlabel('Time [s]'); ylabel('dq_i [rad/s]');
     title(joint_labels{i}); grid on;
-    if i == 1, legend('dq_d', 'CT', 'Robust', 'Adaptive', 'Location', 'best'); end
+    if i == 1, legend('q_d dot', 'CT', 'Robust', 'Adaptive', 'Location', 'best'); end
 end
 sgtitle('Trajectory Tracking - Joint Velocities');
 
+% --- Control Torques ---
 figure('Name', 'Trajectory: Control Torques');
 for i = 1:4
     subplot(2,2,i);
@@ -185,17 +188,19 @@ for i = 1:4
 end
 sgtitle('Trajectory Tracking - Control Torques');
 
-e_ct = vecnorm(q_d_traj - q_ct);
-e_rb = vecnorm(q_d_traj - q_rb);
-e_ad = vecnorm(q_d_traj - q_ad);
+% --- Tracking Error Norm ---
+e_ct = vecnorm(q_d - q_ct);
+e_rb = vecnorm(q_d - q_rb);
+e_ad = vecnorm(q_d - q_ad);
 
 figure('Name', 'Trajectory: Tracking Error Norm');
 plot(t, e_ct, 'b', t, e_rb, 'g', t, e_ad, 'm', 'LineWidth', 1.5);
 xlabel('Time [s]'); ylabel('||e(t)||_2');
-title('Trajectory Tracking - Error Norm ||q_d(t) - q(t)||');
+title('Trajectory Tracking - Error Norm ||q_d - q||');
 legend('Computed Torque', 'Robust', 'Adaptive', 'Location', 'best');
 grid on;
 
+% --- Parameter Evolution (Adaptive only) ---
 param_names = {'m1','m2','m3','m4', ...
                'Ixx1','Iyy1','Izz1','Ixx2','Iyy2','Izz2', ...
                'Ixx3','Iyy3','Izz3','Ixx4','Iyy4','Izz4'};
