@@ -14,7 +14,7 @@ p_nom = [R.p(1:6); ...
          R.id_info.g];
 
 %% True plant parameters (30% mismatch in physical params)
-alpha = 1.8;
+alpha = 1.3;
 p_true = p_nom;
 p_true(7:22) = p_nom(7:22) * alpha;
 
@@ -23,7 +23,7 @@ p_geom = [p_nom(1:6); p_nom(23)];
 
 %% Timing
 Ts = 0.01;
-tf = 10;
+tf = 60;
 t = 0:Ts:tf;
 N = length(t);
 
@@ -37,11 +37,11 @@ q0 = [0.1; 0.2; 0.5; 1.0];
 q_dot0 = zeros(4, 1);
 
 %% Controller gains
-% Kp_ct = diag([0.1 0.08 0.05 0.04]);
-% Kv_ct = diag([0.05 0.05 0.05 0.05]);
+% Kp = diag([1 5 4 1]);
+% Kv = diag([0.5 0.5 0.2 0.008]);
 
-Kp = diag([0.5 0.01 0.01 0.3]);
-Kv = diag([0.05 0.05 0.05 0.05]);
+Kp = diag([1 5 4 1]);
+Kv = diag([0.5 0.5 0.2 0.008]);
 M = M_fun(q0, p_nom);
 
 
@@ -57,7 +57,7 @@ rho = 0.8;
 %% Adaptive controller parameters
 n_params = 16;
 pi_hat_0 = p_nom(7:22);
-R_gain = 1e8 * eye(n_params);
+R_gain = 1e3 * eye(n_params);
 R_inv = inv(R_gain);
 
 %% Plant dynamics (true robot, no friction)
@@ -124,10 +124,10 @@ for k = 1:N
         Kp, Kv, P, R_inv, ...
         pi_hat, p_geom, Ts);
 
-    % update parameters
-    pi_hat = pi_hat + Ts * pi_hat_dot;
-    pi_hat(1:4) = max(pi_hat(1:4), 1e-4);
-    pi_hat(5:16) = max(pi_hat(5:16), 1e-8);
+    % % update parameters
+    % pi_hat = pi_hat + Ts * pi_hat_dot;
+    % pi_hat(1:4) = max(pi_hat(1:4), 1e-4);
+    % pi_hat(5:16) = max(pi_hat(5:16), 1e-8);
 
     if k < N
         pi_hat_hist(:,k+1) = pi_hat;
@@ -158,57 +158,57 @@ for i = 1:4
     if i == 1, legend('CT', 'Robust', 'Adaptive', 'q_d', 'Location', 'best'); end
 end
 sgtitle('Regulation - Joint Positions');
-% 
-% % --- Joint Velocities ---
-% figure('Name', 'Regulation: Joint Velocities');
-% for i = 1:4
-%     subplot(2,2,i);
-%     plot(t, q_dot_ct(i,:), 'b', t, q_dot_rb(i,:), 'g', t, q_dot_ad(i,:), 'm', 'LineWidth', 1.2);
-%     xlabel('Time [s]'); ylabel('dq_i [rad/s]');
-%     title(joint_labels{i}); grid on;
-%     if i == 1, legend('CT', 'Robust', 'Adaptive', 'Location', 'best'); end
-% end
-% sgtitle('Regulation - Joint Velocities');
-% 
-% % --- Control Torques ---
-% figure('Name', 'Regulation: Control Torques');
-% for i = 1:4
-%     subplot(2,2,i);
-%     plot(t, tau_ct(i,:), 'b', t, tau_rb(i,:), 'g', t, tau_ad(i,:), 'm', 'LineWidth', 1.2);
-%     xlabel('Time [s]'); ylabel('\tau_i [Nm]');
-%     title(joint_labels{i}); grid on;
-%     if i == 1, legend('CT', 'Robust', 'Adaptive', 'Location', 'best'); end
-% end
-% sgtitle('Regulation - Control Torques');
-% 
-% % --- Tracking Error Norm ---
-% e_ct = vecnorm(q_d - q_ct);
-% e_rb = vecnorm(q_d - q_rb);
-% e_ad = vecnorm(q_d - q_ad);
-% 
-% figure('Name', 'Regulation: Tracking Error Norm');
-% plot(t, e_ct, 'b', t, e_rb, 'g', t, e_ad, 'm', 'LineWidth', 1.5);
-% xlabel('Time [s]'); ylabel('||e(t)||_2');
-% title('Regulation - Tracking Error Norm ||q_d - q||');
-% legend('Computed Torque', 'Robust', 'Adaptive', 'Location', 'best');
-% grid on;
-% 
-% % --- Parameter Evolution (Adaptive only) ---
-% param_names = {'m1','m2','m3','m4', ...
-%                'Ixx1','Iyy1','Izz1','Ixx2','Iyy2','Izz2', ...
-%                'Ixx3','Iyy3','Izz3','Ixx4','Iyy4','Izz4'};
-% p_true_params = p_true(7:22);
-% 
-% figure('Name', 'Regulation: Parameter Evolution');
-% for i = 1:4
-%     subplot(2,2,i);
-%     plot(t, pi_hat_hist(i,:), 'b', 'LineWidth', 1.2);
-%     hold on; yline(p_true_params(i), 'r--', 'LineWidth', 1.2);
-%     yline(pi_hat_0(i), 'k:', 'LineWidth', 1);
-%     xlabel('Time [s]'); ylabel(param_names{i});
-%     title(['Param: ' param_names{i}]); grid on;
-%     legend('Estimate', 'True', 'Initial', 'Location', 'best');
-% end
-% sgtitle('Regulation - Parameter Evolution (masses)');
-% 
-% fprintf('Done! Regulation simulation complete.\n');
+
+% --- Joint Velocities ---
+figure('Name', 'Regulation: Joint Velocities');
+for i = 1:4
+    subplot(2,2,i);
+    plot(t, q_dot_ct(i,:), 'b', t, q_dot_rb(i,:), 'g', t, q_dot_ad(i,:), 'm', 'LineWidth', 1.2);
+    xlabel('Time [s]'); ylabel('dq_i [rad/s]');
+    title(joint_labels{i}); grid on;
+    if i == 1, legend('CT', 'Robust', 'Adaptive', 'Location', 'best'); end
+end
+sgtitle('Regulation - Joint Velocities');
+
+% --- Control Torques ---
+figure('Name', 'Regulation: Control Torques');
+for i = 1:4
+    subplot(2,2,i);
+    plot(t, tau_ct(i,:), 'b', t, tau_rb(i,:), 'g', t, tau_ad(i,:), 'm', 'LineWidth', 1.2);
+    xlabel('Time [s]'); ylabel('\tau_i [Nm]');
+    title(joint_labels{i}); grid on;
+    if i == 1, legend('CT', 'Robust', 'Adaptive', 'Location', 'best'); end
+end
+sgtitle('Regulation - Control Torques');
+
+% --- Tracking Error Norm ---
+e_ct = vecnorm(q_d - q_ct);
+e_rb = vecnorm(q_d - q_rb);
+e_ad = vecnorm(q_d - q_ad);
+
+figure('Name', 'Regulation: Tracking Error Norm');
+plot(t, e_ct, 'b', t, e_rb, 'g', t, e_ad, 'm', 'LineWidth', 1.5);
+xlabel('Time [s]'); ylabel('||e(t)||_2');
+title('Regulation - Tracking Error Norm ||q_d - q||');
+legend('Computed Torque', 'Robust', 'Adaptive', 'Location', 'best');
+grid on;
+
+% --- Parameter Evolution (Adaptive only) ---
+param_names = {'m1','m2','m3','m4', ...
+               'Ixx1','Iyy1','Izz1','Ixx2','Iyy2','Izz2', ...
+               'Ixx3','Iyy3','Izz3','Ixx4','Iyy4','Izz4'};
+p_true_params = p_true(7:22);
+
+figure('Name', 'Regulation: Parameter Evolution');
+for i = 1:4
+    subplot(2,2,i);
+    plot(t, pi_hat_hist(i,:), 'b', 'LineWidth', 1.2);
+    hold on; yline(p_true_params(i), 'r--', 'LineWidth', 1.2);
+    yline(pi_hat_0(i), 'k:', 'LineWidth', 1);
+    xlabel('Time [s]'); ylabel(param_names{i});
+    title(['Param: ' param_names{i}]); grid on;
+    legend('Estimate', 'True', 'Initial', 'Location', 'best');
+end
+sgtitle('Regulation - Parameter Evolution (masses)');
+
+fprintf('Done! Regulation simulation complete.\n');

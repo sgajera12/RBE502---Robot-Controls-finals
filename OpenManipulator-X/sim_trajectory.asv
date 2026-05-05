@@ -47,11 +47,10 @@ q_dot0 = q_dot_d_traj(:, 1);
 %% Controller gains
 Kp = diag([1 5 4 1]);
 Kv = diag([0.5 0.5 0.2 0.008]);
-M = M_fun(q0, p_nom);
 
 %% Lyapunov equation
 n = 4;
-A_err = [zeros(n) eye(n); -pinv(M)*Kp -pinv(M)*Kv];
+A_err = [zeros(n) eye(n); -Kp -Kv];
 Q_lyap = eye(2*n);
 P = lyap(A_err', Q_lyap);
 
@@ -61,7 +60,7 @@ rho = 0.8;
 %% Adaptive parameters
 n_params = 16;
 pi_hat_0 = p_nom(7:22);
-R_gain = 1e5 * eye(n_params);
+R_gain = 1e20 * eye(n_params);
 R_inv = inv(R_gain);
 
 %% Plant dynamics (true robot, no friction)
@@ -91,6 +90,13 @@ for k = 1:N
         x_next = xk + (h/6)*(k1 + 2*k2 + 2*k3 + k4);
         q_ct(:,k+1) = x_next(1:4);
         q_dot_ct(:,k+1) = x_next(5:8);
+                if any(~isfinite(x_next))
+            fprintf('CT BLEW UP at k=%d, t=%.2f s\n', k, t(k));
+            fprintf('q = [%.3f %.3f %.3f %.3f]\n', q_ct(:,k));
+            fprintf('tau = [%.3f %.3f %.3f %.3f]\n', tau_ct(:,k));
+            N = k; t = t(1:N); break;
+        end
+
     end
 end
 
